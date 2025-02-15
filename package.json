@@ -1,0 +1,44 @@
+{
+  "name": "terminal-ai-assistant",
+  "version": "1.0.1",
+  "description": "AI-powered terminal assistant using DeepSeek-V3",
+  "type": "module",
+  "main": "dist/cli.js",
+  "bin": {
+    "tai": "./dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "prepublishOnly": "npm run build",
+    "start": "node dist/cli.js",
+    "encrypt": "ts-node scripts/encrypt-key.ts"
+  },
+  "keywords": [
+    "cli",
+    "terminal",
+    "ai",
+    "assistant",
+    "deepseek",
+    "command-line"
+  ],
+  "author": "Rushikesh Nimkar",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/yourusername/ta-cli.git"
+  },
+  "dependencies": {
+    "chalk": "^5.3.0",
+    "commander": "^11.0.0",
+    "dotenv": "^16.4.7"
+  },
+  "devDependencies": {
+    "@types/node": "^20.17.19",
+    "typescript": "^5.7.3"
+  }
+}
