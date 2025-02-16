@@ -16,6 +16,8 @@ program
         try {
             console.log(chalk.blue('🔄 Generating command...'));
             const [command] = await AIService.generateCommand(query);
+            
+            // Display only the command
             console.log(chalk.yellow('📝 Command:', command));
 
             console.log(chalk.blue('⚡ Executing...'));

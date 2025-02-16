@@ -45,26 +45,17 @@ export class AIService {
     private static readonly RETRY_DELAY = 1000;
 
     private static createPrompt(userInput: string): string {
-        return `Task: Generate a Windows command prompt command.
+        return `Task: Generate a valid Windows Command Prompt command.
 Current directory: ${this.CURRENT_DIR}
 User request: ${userInput}
 
 Requirements:
-1. Output ONLY the command with no explanations
-2. For current directory, use relative paths
-3. For other drives, use absolute paths (e.g., D:\\)
-4. Use backslashes (\\) for paths
-5. Keep forward slashes (/) for command parameters
-6. No PowerShell commands
-7. No backticks or code blocks
-8. Command must be executable in Windows CMD
-
-Example format:
-User: "list files"
-Output: dir /B
-
-User: "show hidden files"
-Output: dir /A:H
+1. Provide only the command without explanation.
+2. Use relative paths where applicable.
+3. No PowerShell commands, only CMD-compatible commands.
+4. The command must be safe and executable in Windows CMD.
+5. Ensure correct syntax for "for" loops and file redirections.
+6.no repetation of commands
 
 Your response:`;
     }
@@ -117,36 +108,56 @@ Your response:`;
         if (!data?.choices?.[0]?.message?.content) {
             throw new AIError('Invalid or empty response from AI', 'INVALID_RESPONSE');
         }
-
-        const content = data.choices[0].message.content.trim();
+    
+        let content = data.choices[0].message.content.trim();
         if (!content) {
-            throw new AIError('AI returned empty command', 'EMPTY_COMMAND');
+            throw new AIError('AI returned an empty command', 'EMPTY_COMMAND');
         }
-
-        return content;
+    
+        // Remove duplicate lines
+        const lines = content.split(/\r?\n/).map(line => line.trim());
+        const uniqueLines = [...new Set(lines)]; // Remove duplicates
+    
+        return uniqueLines.join(' '); // Ensure a single clean command
     }
+    
 
     private static cleanCommand(command: string): string {
-        return command
-            .replace(/```[\s\S]*?```/g, '')
-            .replace(/`/g, '')
-            .replace(/\n/g, ' ')
-            .replace(/\s+/g, ' ')
-            .replace(/([^/])\/([^/])/g, '$1\\$2')
-            .replace(/^[>$\s]+/, '')
-            .replace(/^cmd\s*\/c\s*/i, '')
+        let cleanedCommand = command
+            .replace(/```[\s\S]*?```/g, '') // Remove code block formatting
+            .replace(/`/g, '') // Remove backticks
+            .replace(/\n/g, ' ') // Convert newlines to spaces
+            .replace(/\s+/g, ' ') // Normalize spaces
+            .replace(/^[>$\s]+/, '') // Remove prompt characters
+            .replace(/^cmd\s*\/c\s*/i, '') // Remove redundant prefixes
             .trim();
+    
+        // Fix repeated command issues (e.g., "color 2color 2" -> "color 2")
+        cleanedCommand = cleanedCommand.replace(/\b(\w+ \d?)\s*\1\b/gi, '$1');
+    
+        return cleanedCommand;
     }
+    
+    
+    
+    
 
     private static validateCommand(command: string): void {
         if (!command) {
             throw new AIError('Command is empty after cleaning', 'EMPTY_COMMAND');
         }
-
+    
         if (this.requiresAdminPrivileges(command)) {
             throw new AIError('This command requires administrator privileges', 'ADMIN_REQUIRED');
         }
+    
+        // Ensure correct redirection use
+        const redirectionCount = (command.match(/(?<!>)>/g) || []).length; // Only count `>` (not `>>`)
+        if (redirectionCount > 1) {
+            throw new AIError('Too many output redirections in command', 'INVALID_REDIRECTION');
+        }
     }
+    
 
     private static requiresAdminPrivileges(command: string): boolean {
         const commandLower = command.toLowerCase();
@@ -155,7 +166,7 @@ Your response:`;
         );
     }
 
-    static async generateCommand(userInput: string): Promise<string[]> {
+    static async generateCommand(userInput: string): Promise<[string, string?]> {
         try {
             if (!userInput?.trim()) {
                 throw new AIError('User input is required', 'INVALID_INPUT');
@@ -169,13 +180,15 @@ Your response:`;
 
             const data: OpenRouterResponse = await response.json();
             const content = this.validateResponse(data);
+            
+            // Clean and validate the command
             const command = this.cleanCommand(content);
             this.validateCommand(command);
 
             return [command];
         } catch (error) {
             if (error instanceof AIError) {
-                throw new Error(`Command generation failed (${error.code}): ${error.message}`);
+                throw error;
             }
             throw new Error('An unexpected error occurred during command generation');
         }
