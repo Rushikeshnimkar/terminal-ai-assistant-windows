@@ -1,125 +1,129 @@
-import { createDecipheriv } from 'crypto';
-
 interface ChatMessage {
     role: 'user' | 'assistant';
     content: string;
+    refusal?: null;
 }
 
-interface HyperbolicResponse {
+interface OpenRouterResponse {
+    id: string;
+    provider: string;
+    model: string;
+    object: string;
+    created: number;
     choices: [{
-        message: {
-            content: string;
-        }
+        index: number;
+        message: ChatMessage;
+        finish_reason: string;
+        native_finish_reason: string;
+        logprobs?: any;
     }];
+    usage: {
+        prompt_tokens: number;
+        completion_tokens: number;
+        total_tokens: number;
+    };
+}
+
+class AIError extends Error {
+    constructor(message: string, public code: string) {
+        super(message);
+        this.name = 'AIError';
+    }
 }
 
 export class AIService {
-    private static readonly API_URL = 'https://api.hyperbolic.xyz/v1/chat/completions';
-    private static readonly MODEL_NAME = 'deepseek-ai/DeepSeek-V3';
+    private static readonly API_URL = 'https://terminal-ai-api.vercel.app/api';
     private static readonly CURRENT_DIR = process.cwd();
     private static readonly ADMIN_COMMANDS: Set<string> = new Set([
-        'netsh', 'net', 'sc', 'reg', 'bcdedit', 'diskpart', 'dism', 'sfc'
+        'netsh', 'net', 'sc', 'reg', 'bcdedit', 'diskpart', 'dism', 'sfc',
+        'format', 'chkdsk', 'taskkill', 'rd /s', 'rmdir /s', 'del /f',
+        'takeown', 'icacls', 'attrib', 'cacls', 'runas'
     ]);
 
-    // Replace with your encrypted values from the encryption script
-    private static readonly ENCRYPTED_KEY = '4bb5d368c276976857528aac9cb1a3cbae7d827e52d8830b66bcd7245dbfb858ebdc646aac8f6b311daf96815fd41e29f8ff77cc2e1d5a65ec4165e428e1caf84e80e202b3514b69298b8dfe630c83fd4a95efb7ae3aa5604eed97b719105d6771aa4546b10d85b2160f269b5aa65677bc9b4d7059a1f8debd286334c3df69fad1770f023e057f1ed2edf2f0d67184d73c459d787a2b44013f857ffee2cb2f1d';
-    private static readonly ENCRYPTION_KEY = 'c33ab585f68714e93e44f48b92d4ae97384f9268286a4626204603807378f92a';
-    private static readonly IV = 'e7a1dcc972e2c9d0d609c929328e40e7';
+    private static readonly TIMEOUT = 30000;
+    private static readonly MAX_RETRIES = 3;
+    private static readonly RETRY_DELAY = 1000;
 
-    private static getApiKey(): string {
-        try {
-            const decipher = createDecipheriv(
-                'aes-256-cbc',
-                Buffer.from(this.ENCRYPTION_KEY, 'hex'),
-                Buffer.from(this.IV, 'hex')
-            );
-            
-            let decrypted = decipher.update(this.ENCRYPTED_KEY, 'hex', 'utf8');
-            decrypted += decipher.final('utf8');
-            return decrypted;
-        } catch (error) {
-            throw new Error('Failed to decrypt API key');
-        }
+    private static createPrompt(userInput: string): string {
+        return `Task: Generate a Windows command prompt command.
+Current directory: ${this.CURRENT_DIR}
+User request: ${userInput}
+
+Requirements:
+1. Output ONLY the command with no explanations
+2. For current directory, use relative paths
+3. For other drives, use absolute paths (e.g., D:\\)
+4. Use backslashes (\\) for paths
+5. Keep forward slashes (/) for command parameters
+6. No PowerShell commands
+7. No backticks or code blocks
+8. Command must be executable in Windows CMD
+
+Example format:
+User: "list files"
+Output: dir /B
+
+User: "show hidden files"
+Output: dir /A:H
+
+Your response:`;
     }
 
-    private static async fetchWithTimeout(url: string, options: RequestInit, timeout = 60000) {
-        const controller = new AbortController();
-        const id = setTimeout(() => controller.abort(), timeout);
+    private static async fetchWithRetry(url: string, options: RequestInit): Promise<Response> {
+        let lastError: Error | null = null;
 
-        try {
-            const response = await fetch(url, {
-                ...options,
-                signal: controller.signal
-            });
-            clearTimeout(id);
-            return response;
-        } catch (error) {
-            clearTimeout(id);
-            if (error instanceof Error && error.name === 'AbortError') {
-                throw new Error('Request timed out. Please try again.');
+        for (let attempt = 1; attempt <= this.MAX_RETRIES; attempt++) {
+            try {
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), this.TIMEOUT);
+
+                const response = await fetch(url, {
+                    ...options,
+                    signal: controller.signal
+                });
+
+                clearTimeout(timeoutId);
+
+                if (!response.ok) {
+                    throw new AIError(
+                        `API returned ${response.status}: ${await response.text()}`,
+                        'API_ERROR'
+                    );
+                }
+
+                return response;
+            } catch (error) {
+                lastError = error instanceof Error ? error : new Error('Unknown error');
+
+                if (error instanceof Error && error.name === 'AbortError') {
+                    throw new AIError('Request timed out', 'TIMEOUT');
+                }
+
+                if (attempt === this.MAX_RETRIES) {
+                    break;
+                }
+
+                await new Promise(resolve => setTimeout(resolve, this.RETRY_DELAY * attempt));
             }
-            throw error;
         }
+
+        throw new AIError(
+            `Failed after ${this.MAX_RETRIES} attempts: ${lastError?.message}`,
+            'MAX_RETRIES_EXCEEDED'
+        );
     }
 
-    static async generateCommand(userInput: string): Promise<string[]> {
-        try {
-            const apiKey = this.getApiKey();
-            const currentDir = this.CURRENT_DIR;
-
-            const messages: ChatMessage[] = [{
-                role: 'user',
-                content: `You are in the Windows Command Prompt at: ${currentDir}>
-Generate a command for this task: "${userInput}"
-Rules:
-- Output ONLY the command, no explanations
-- Consider you're already in ${currentDir}
-- Use absolute paths for other drives (e.g., D:\\)
-- Use relative paths for current directory
-- No backticks or code blocks
-- Generate efficient commands`
-            }];
-
-            const response = await this.fetchWithTimeout(this.API_URL, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${apiKey}`,
-                },
-                body: JSON.stringify({
-                    messages,
-                    model: this.MODEL_NAME,
-                    max_tokens: 512,
-                    temperature: 0.1,
-                    top_p: 0.9,
-                    stream: false
-                })
-            });
-
-            if (!response.ok) {
-                const errorText = await response.text();
-                throw new Error(`API Error (${response.status}): ${errorText}`);
-            }
-
-            const data: HyperbolicResponse = await response.json();
-            
-            if (!data?.choices?.[0]?.message?.content) {
-                throw new Error('Invalid response from API');
-            }
-
-            const command = this.cleanCommand(data.choices[0].message.content);
-
-            if (this.requiresAdminPrivileges(command)) {
-                throw new Error('This command requires administrator privileges.');
-            }
-
-            return [command];
-        } catch (error) {
-            if (error instanceof Error) {
-                throw new Error(`Command generation failed: ${error.message}`);
-            }
-            throw new Error('An unexpected error occurred');
+    private static validateResponse(data: OpenRouterResponse): string {
+        if (!data?.choices?.[0]?.message?.content) {
+            throw new AIError('Invalid or empty response from AI', 'INVALID_RESPONSE');
         }
+
+        const content = data.choices[0].message.content.trim();
+        if (!content) {
+            throw new AIError('AI returned empty command', 'EMPTY_COMMAND');
+        }
+
+        return content;
     }
 
     private static cleanCommand(command: string): string {
@@ -127,11 +131,53 @@ Rules:
             .replace(/```[\s\S]*?```/g, '')
             .replace(/`/g, '')
             .replace(/\n/g, ' ')
+            .replace(/\s+/g, ' ')
+            .replace(/([^/])\/([^/])/g, '$1\\$2')
+            .replace(/^[>$\s]+/, '')
+            .replace(/^cmd\s*\/c\s*/i, '')
             .trim();
     }
 
+    private static validateCommand(command: string): void {
+        if (!command) {
+            throw new AIError('Command is empty after cleaning', 'EMPTY_COMMAND');
+        }
+
+        if (this.requiresAdminPrivileges(command)) {
+            throw new AIError('This command requires administrator privileges', 'ADMIN_REQUIRED');
+        }
+    }
+
     private static requiresAdminPrivileges(command: string): boolean {
-        const baseCommand = command.split(' ')[0].toLowerCase();
-        return this.ADMIN_COMMANDS.has(baseCommand);
+        const commandLower = command.toLowerCase();
+        return Array.from(this.ADMIN_COMMANDS).some(adminCmd => 
+            commandLower.includes(adminCmd.toLowerCase())
+        );
+    }
+
+    static async generateCommand(userInput: string): Promise<string[]> {
+        try {
+            if (!userInput?.trim()) {
+                throw new AIError('User input is required', 'INVALID_INPUT');
+            }
+
+            const response = await this.fetchWithRetry(this.API_URL, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ prompt: this.createPrompt(userInput) })
+            });
+
+            const data: OpenRouterResponse = await response.json();
+            const content = this.validateResponse(data);
+            const command = this.cleanCommand(content);
+            this.validateCommand(command);
+
+            return [command];
+        } catch (error) {
+            if (error instanceof AIError) {
+                throw new Error(`Command generation failed (${error.code}): ${error.message}`);
+            }
+            throw new Error('An unexpected error occurred during command generation');
+        }
     }
 }

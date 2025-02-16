@@ -1,6 +1,6 @@
 {
   "name": "terminal-ai-assistant",
-  "version": "1.0.1",
+  "version": "1.0.3",
   "description": "AI-powered terminal assistant using DeepSeek-V3",
   "type": "module",
   "main": "dist/cli.js",
@@ -30,7 +30,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/yourusername/ta-cli.git"
+    "url": "https://github.com/Rushikeshnimkar/terminal-ai-assistant-windows"
   },
   "dependencies": {
     "chalk": "^5.3.0",
