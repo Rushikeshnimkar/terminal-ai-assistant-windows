@@ -132,11 +132,12 @@ Your response:`;
             .replace(/^cmd\s*\/c\s*/i, '') // Remove redundant prefixes
             .trim();
     
-        // Fix repeated command issues (e.g., "color 2color 2" -> "color 2")
-        cleanedCommand = cleanedCommand.replace(/\b(\w+ \d?)\s*\1\b/gi, '$1');
+        // Fix repeated command issues (e.g., "dir D:\ /Bdir D:\ /B" -> "dir D:\ /B")
+        cleanedCommand = cleanedCommand.replace(/\b(dir\s+[A-Za-z]:\\\s+\/B)\s*\1\b/gi, '$1');
     
         return cleanedCommand;
     }
+    
     
     
     
