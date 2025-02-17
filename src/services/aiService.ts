@@ -1,3 +1,5 @@
+import chalk from "chalk";
+
 interface ChatMessage {
     role: 'user' | 'assistant';
     content: string;
@@ -37,7 +39,7 @@ export class AIService {
     private static readonly ADMIN_COMMANDS: Set<string> = new Set([
         'netsh', 'net', 'sc', 'reg', 'bcdedit', 'diskpart', 'dism', 'sfc',
         'format', 'chkdsk', 'taskkill', 'rd /s', 'rmdir /s', 'del /f',
-        'takeown', 'icacls', 'attrib', 'cacls', 'runas'
+        'takeown', 'icacls', 'attrib', 'runas'
     ]);
 
     private static readonly TIMEOUT = 30000;
@@ -50,12 +52,11 @@ Current directory: ${this.CURRENT_DIR}
 User request: ${userInput}
 
 Requirements:
-1. Provide only the command without explanation.
+1. Provide ONLY ONE single command without explanation or repetition.
 2. Use relative paths where applicable.
 3. No PowerShell commands, only CMD-compatible commands.
 4. The command must be safe and executable in Windows CMD.
-5. Ensure correct syntax for "for" loops and file redirections.
-6.no repetation of commands
+
 
 Your response:`;
     }
@@ -104,6 +105,23 @@ Your response:`;
         );
     }
 
+    private static removeCommandRepetitions(command: string): string {
+        const trimmedCommand = command.trim();
+        const length = trimmedCommand.length;
+        
+        // If command length is odd, it can't be a perfect repetition
+        if (length % 2 !== 0) {
+            return trimmedCommand;
+        }
+        
+        const halfLength = length / 2;
+        const firstHalf = trimmedCommand.slice(0, halfLength);
+        const secondHalf = trimmedCommand.slice(halfLength);
+        
+        // If both halves are identical, return just one half
+        return firstHalf === secondHalf ? firstHalf : trimmedCommand;
+    }
+
     private static validateResponse(data: OpenRouterResponse): string {
         if (!data?.choices?.[0]?.message?.content) {
             throw new AIError('Invalid or empty response from AI', 'INVALID_RESPONSE');
@@ -114,35 +132,94 @@ Your response:`;
             throw new AIError('AI returned an empty command', 'EMPTY_COMMAND');
         }
     
-        // Remove duplicate lines
+        // Take only the first non-empty line as the command
         const lines = content.split(/\r?\n/).map(line => line.trim());
-        const uniqueLines = [...new Set(lines)]; // Remove duplicates
+        const firstValidLine = lines.find(line => line.length > 0);
+        
+        if (!firstValidLine) {
+            throw new AIError('No valid command found in AI response', 'INVALID_RESPONSE');
+        }
     
-        return uniqueLines.join(' '); // Ensure a single clean command
+        // Remove any command repetitions before returning
+        return this.removeCommandRepetitions(firstValidLine);
     }
     
 
     private static cleanCommand(command: string): string {
+        // First, clean the basic formatting
         let cleanedCommand = command
-            .replace(/```[\s\S]*?```/g, '') // Remove code block formatting
-            .replace(/`/g, '') // Remove backticks
-            .replace(/\n/g, ' ') // Convert newlines to spaces
-            .replace(/\s+/g, ' ') // Normalize spaces
-            .replace(/^[>$\s]+/, '') // Remove prompt characters
-            .replace(/^cmd\s*\/c\s*/i, '') // Remove redundant prefixes
             .trim();
     
-        // Fix repeated command issues (e.g., "dir D:\ /Bdir D:\ /B" -> "dir D:\ /B")
-        cleanedCommand = cleanedCommand.replace(/\b(dir\s+[A-Za-z]:\\\s+\/B)\s*\1\b/gi, '$1');
+        // Store URLs temporarily with a placeholder
+        const urls: string[] = [];
+        cleanedCommand = cleanedCommand.replace(/(https?:\/\/[^\s]+)/g, (match) => {
+            urls.push(match);
+            return `__URL${urls.length - 1}__`;
+        });
+    
+        // Handle common commands with their parameters
+        const commonCommands = {
+            'ipconfig': ['/all', '/release', '/renew', '/flushdns'],
+            'dir': ['/a', '/b', '/s', '/w', '/p', '/o', '/ad'],
+            'netstat': ['-a', '-n', '-b', '-o'],
+            'ping': ['-t', '-a', '-n', '-l'],
+            'curl': ['-s', '-o', '-L', '-I', '-H']
+        };
+    
+        // Find the base command
+        const firstWord = cleanedCommand.split(' ')[0].toLowerCase();
+        
+        if (commonCommands[firstWord as keyof typeof commonCommands]) {
+            // Extract all valid parameters for this command
+            const validParams = commonCommands[firstWord as keyof typeof commonCommands];
+            const params = new Set<string>();
+            
+            // Find all parameters in the command
+            const paramMatches = cleanedCommand.match(/\/[a-zA-Z]+|-[a-zA-Z]+/g) || [];
+            
+            // Keep only valid, unique parameters
+            paramMatches.forEach(param => {
+                if (validParams.includes(param.toLowerCase())) {
+                    params.add(param.toLowerCase());
+                }
+            });
+    
+            // Reconstruct the command with unique parameters
+            cleanedCommand = firstWord + ' ' + Array.from(params).join(' ');
+        } else {
+            // For unknown commands, just take the first instance of the command and its immediate parameters
+            const parts = cleanedCommand.split(' ');
+            const baseCommand = parts[0];
+            let parameters = [];
+            
+            // Collect parameters until we hit another instance of the base command
+            for (let i = 1; i < parts.length; i++) {
+                if (parts[i].toLowerCase() === baseCommand.toLowerCase()) {
+                    break;
+                }
+                parameters.push(parts[i]);
+            }
+            
+            cleanedCommand = baseCommand + (parameters.length ? ' ' + parameters.join(' ') : '');
+        }
+    
+        // Restore URLs
+        urls.forEach((url, index) => {
+            cleanedCommand = cleanedCommand.replace(`__URL${index}__`, url);
+        });
+    
+        // Fix path separators (only for Windows paths, not URLs or parameters)
+        cleanedCommand = cleanedCommand.replace(/(?<!http:|https:)\/\//g, '\\');
+    
+        // Ensure command doesn't start with an invalid character
+        if (/^[^a-zA-Z0-9]/.test(cleanedCommand)) {
+            throw new AIError('Invalid command structure', 'INVALID_COMMAND');
+        }
     
         return cleanedCommand;
     }
     
     
-    
-    
-    
-
     private static validateCommand(command: string): void {
         if (!command) {
             throw new AIError('Command is empty after cleaning', 'EMPTY_COMMAND');
@@ -152,10 +229,15 @@ Your response:`;
             throw new AIError('This command requires administrator privileges', 'ADMIN_REQUIRED');
         }
     
-        // Ensure correct redirection use
-        const redirectionCount = (command.match(/(?<!>)>/g) || []).length; // Only count `>` (not `>>`)
-        if (redirectionCount > 1) {
-            throw new AIError('Too many output redirections in command', 'INVALID_REDIRECTION');
+        // Updated redirection validation to allow for complex commands
+        // Allow multiple redirections if they're part of different command segments (separated by & or |)
+        const commandSegments = command.split(/[&|]/);
+        for (const segment of commandSegments) {
+            // Count redirections within each command segment
+            const redirectionCount = (segment.match(/(?<!>)>/g) || []).length;
+            if (redirectionCount > 1) {
+                throw new AIError('Too many output redirections in a single command segment', 'INVALID_REDIRECTION');
+            }
         }
     }
     
@@ -180,10 +262,7 @@ Your response:`;
             });
 
             const data: OpenRouterResponse = await response.json();
-            const content = this.validateResponse(data);
-            
-            // Clean and validate the command
-            const command = this.cleanCommand(content);
+            const command = this.validateResponse(data);
             this.validateCommand(command);
 
             return [command];

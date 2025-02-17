@@ -1,6 +1,6 @@
 # Terminal AI Assistant
 
-A powerful CLI tool that helps users interact with the Windows command line using natural language. Built with Node.js and powered by DeepSeek-V3 AI.
+A powerful CLI tool that helps users interact with the Windows command line using natural language. Built with Node.js and powered by Qwen: Qwen2.5 VL 72B Instruct AI.
 
 ## Features
 
@@ -8,7 +8,6 @@ A powerful CLI tool that helps users interact with the Windows command line usin
 - 💻 Real-time command execution
 - 🛡️ Secure command handling
 - ⚡ Fast response times
-- 🔒 Built-in API key encryption
 - 🖥️ Cross-platform support
 
 ## Installation
@@ -66,14 +65,12 @@ terminal-ai-assistant/
 ## Technology Stack
 
 - 🟦 TypeScript - Type safety and modern JavaScript features
-- 🤖 DeepSeek-V3 - Advanced AI model for command generation
-- 🔐 Node.js crypto - Secure API key handling
+- 🤖 Qwen: Qwen2.5 VL 72B Instruct - Advanced AI model for command generation
 - 🎨 Chalk - Beautiful terminal output
 - 📝 Commander.js - CLI framework
 
 ## Security Features
 
-- Encrypted API key storage
 - Admin command detection
 - Secure command execution
 - Input sanitization
@@ -96,7 +93,6 @@ Rushikesh Nimkar
 
 ## Acknowledgments
 
-- [DeepSeek AI](https://deepseek.ai)
+- [Qwen AI](https://qwen.ai)
 - [Node.js](https://nodejs.org/)
 - [Commander.js](https://github.com/tj/commander.js/)
-
