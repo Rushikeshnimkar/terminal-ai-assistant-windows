@@ -1,276 +1,213 @@
+// services/aiService.ts
+
 import chalk from "chalk";
+import { HistoryService } from "./historyService.js";
+import dotenv from "dotenv";
+import path from "path";
+import os from "os";
 
-interface ChatMessage {
-    role: 'user' | 'assistant';
-    content: string;
-    refusal?: null;
-}
+// Load environment variables
+dotenv.config({ path: path.join(os.homedir(), ".terminal-ai", ".env") });
 
-interface OpenRouterResponse {
-    id: string;
-    provider: string;
-    model: string;
-    object: string;
-    created: number;
-    choices: [{
-        index: number;
-        message: ChatMessage;
-        finish_reason: string;
-        native_finish_reason: string;
-        logprobs?: any;
-    }];
-    usage: {
-        prompt_tokens: number;
-        completion_tokens: number;
-        total_tokens: number;
-    };
+interface AIResponse {
+  reasoning: string;
+  command: string;
 }
 
 class AIError extends Error {
-    constructor(message: string, public code: string) {
-        super(message);
-        this.name = 'AIError';
-    }
+  constructor(message: string, public code: string) {
+    super(message);
+    this.name = "AIError";
+  }
 }
 
 export class AIService {
-    private static readonly API_URL = 'https://terminal-ai-api.vercel.app/api';
-    private static readonly CURRENT_DIR = process.cwd();
-    private static readonly ADMIN_COMMANDS: Set<string> = new Set([
-        'netsh', 'net', 'sc', 'reg', 'bcdedit', 'diskpart', 'dism', 'sfc',
-        'format', 'chkdsk', 'taskkill', 'rd /s', 'rmdir /s', 'del /f',
-        'takeown', 'icacls', 'attrib', 'runas'
-    ]);
+  private static readonly API_URL = "https://terminal-ai-api.vercel.app/api";
+  private static readonly CURRENT_DIR = process.cwd();
 
-    private static readonly TIMEOUT = 30000;
-    private static readonly MAX_RETRIES = 3;
-    private static readonly RETRY_DELAY = 1000;
+  // We keep these lists to check if we should warn the user
+  private static readonly ADMIN_COMMANDS: Set<string> = new Set([
+    "netsh",
+    "net",
+    "sc",
+    "reg",
+    "bcdedit",
+    "diskpart",
+    "dism",
+    "sfc",
+    "format",
+    "chkdsk",
+    "taskkill",
+    "rd /s",
+    "rmdir /s",
+    "del /f",
+    "takeown",
+    "icacls",
+    "attrib",
+    "runas",
+  ]);
 
-    private static createPrompt(userInput: string): string {
-        return `Task: Generate a valid Windows Command Prompt command.
+  private static readonly FILE_OPERATION_COMMANDS: Set<string> = new Set([
+    "mkdir",
+    "touch",
+    "echo",
+    "cd",
+    "copy",
+    "xcopy",
+    "md",
+    "move",
+    "type",
+    "del",
+    "rmdir",
+    "rd",
+    "ren",
+    "rename",
+  ]);
+
+  // Public method to check if a command is potentially dangerous
+  static isPotentiallyDangerous(command: string): boolean {
+    const commandLower = command.toLowerCase();
+
+    // Check for admin commands
+    if (
+      Array.from(this.ADMIN_COMMANDS).some((adminCmd) =>
+        commandLower.includes(adminCmd.toLowerCase())
+      )
+    ) {
+      return true;
+    }
+
+    // Check for file deletion commands
+    if (
+      commandLower.startsWith("del ") ||
+      commandLower.startsWith("rd ") ||
+      commandLower.startsWith("rmdir ")
+    ) {
+      return true;
+    }
+
+    return false;
+  }
+
+  private static async createPrompt(userInput: string): Promise<string> {
+    const recentHistory = await HistoryService.getRecentHistory(5);
+    const historyContext = recentHistory
+      .map((msg) => `${msg.role}: ${msg.content}`)
+      .join("\n");
+
+    const systemInfo = {
+      username: process.env.USERNAME || os.userInfo().username,
+      hostname: os.hostname(),
+      platform: os.platform(),
+      osVersion: os.release(),
+      currentDirectory: process.cwd(),
+    };
+
+    // Updated prompt to ask for JSON
+    return `Task: Analyze the user's request, formulate a step-by-step reasoning plan, and then generate a single, valid Windows Command Prompt (CMD) command to accomplish it.
+
+System Information:
 Current directory: ${this.CURRENT_DIR}
+Username: ${systemInfo.username}
+OS: ${systemInfo.platform} ${systemInfo.osVersion}
+
+${historyContext ? `Recent conversation:\n${historyContext}\n\n` : ""}
+
 User request: ${userInput}
 
 Requirements:
-1. Provide ONLY ONE single command without explanation or repetition.
-2. Use relative paths where applicable.
-3. No PowerShell commands, only CMD-compatible commands.
-4. The command must be safe and executable in Windows CMD.
-
-
-Your response:`;
+1.  **Reasoning:** First, provide a brief, step-by-step plan (as a string) explaining how you'll achieve the user's request.
+2.  **Command:** Second, provide ONLY ONE single-line, executable CMD command. No PowerShell.
+3.  **Safety:** Avoid destructive commands unless explicitly asked. Use relative paths.
+4.  **Format:** Your response MUST be in this exact JSON format:
+    {
+      "reasoning": "Your step-by-step plan here.",
+      "command": "Your single-line command here."
     }
 
-    private static async fetchWithRetry(url: string, options: RequestInit): Promise<Response> {
-        let lastError: Error | null = null;
+Your JSON response:`;
+  }
 
-        for (let attempt = 1; attempt <= this.MAX_RETRIES; attempt++) {
-            try {
-                const controller = new AbortController();
-                const timeoutId = setTimeout(() => controller.abort(), this.TIMEOUT);
+  private static parseAIResponse(responseText: string): AIResponse {
+    try {
+      // Find the JSON block, even if the AI adds text around it
+      const jsonMatch = responseText.match(/\{[\s\S]*\}/);
+      if (!jsonMatch) {
+        throw new Error("No JSON object found in AI response.");
+      }
 
-                const response = await fetch(url, {
-                    ...options,
-                    signal: controller.signal
-                });
+      const parsed = JSON.parse(jsonMatch[0]);
 
-                clearTimeout(timeoutId);
+      if (!parsed.command || !parsed.reasoning) {
+        throw new Error("AI response missing 'command' or 'reasoning' field.");
+      }
 
-                if (!response.ok) {
-                    throw new AIError(
-                        `API returned ${response.status}: ${await response.text()}`,
-                        'API_ERROR'
-                    );
-                }
+      // Basic cleanup of the command
+      const command = parsed.command
+        .trim()
+        .replace(/^`+cmd\n?|`+$/g, "") // Remove markdown fences
+        .trim();
 
-                return response;
-            } catch (error) {
-                lastError = error instanceof Error ? error : new Error('Unknown error');
-
-                if (error instanceof Error && error.name === 'AbortError') {
-                    throw new AIError('Request timed out', 'TIMEOUT');
-                }
-
-                if (attempt === this.MAX_RETRIES) {
-                    break;
-                }
-
-                await new Promise(resolve => setTimeout(resolve, this.RETRY_DELAY * attempt));
-            }
-        }
-
-        throw new AIError(
-            `Failed after ${this.MAX_RETRIES} attempts: ${lastError?.message}`,
-            'MAX_RETRIES_EXCEEDED'
-        );
+      return {
+        reasoning: parsed.reasoning.trim(),
+        command: command,
+      };
+    } catch (error) {
+      console.error(
+        chalk.red("Failed to parse AI response:"),
+        error,
+        "\nRaw response:",
+        responseText
+      );
+      throw new AIError(
+        "Invalid or empty response from AI. Try again.",
+        "INVALID_RESPONSE"
+      );
     }
+  }
 
-    private static removeCommandRepetitions(command: string): string {
-        const trimmedCommand = command.trim();
-        const length = trimmedCommand.length;
-        
-        // If command length is odd, it can't be a perfect repetition
-        if (length % 2 !== 0) {
-            return trimmedCommand;
-        }
-        
-        const halfLength = length / 2;
-        const firstHalf = trimmedCommand.slice(0, halfLength);
-        const secondHalf = trimmedCommand.slice(halfLength);
-        
-        // If both halves are identical, return just one half
-        return firstHalf === secondHalf ? firstHalf : trimmedCommand;
+  static async generateCommand(userInput: string): Promise<[string, string]> {
+    try {
+      if (!userInput?.trim()) {
+        throw new Error("User input is required");
+      }
+
+      // History service is now the single source of truth
+      await HistoryService.init();
+      const prompt = await this.createPrompt(userInput);
+
+      // We don't need a conversationId, just send the full prompt
+      const response = await fetch(this.API_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          prompt: prompt, // We send our crafted prompt
+        }),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`API Error: ${errorText}`);
+      }
+
+      const data = await response.json();
+      const aiRawText = data.choices[0]?.message?.content || "";
+
+      // Parse the JSON response
+      const { reasoning, command } = this.parseAIResponse(aiRawText);
+
+      // Save to history
+      await HistoryService.addMessage("user", userInput);
+      // Save the *command* as the assistant's response for context
+      await HistoryService.addMessage("assistant", command);
+
+      return [command, reasoning];
+    } catch (error) {
+      throw new Error(
+        `Command generation failed: ${
+          error instanceof Error ? error.message : "Unknown error"
+        }`
+      );
     }
-
-    private static validateResponse(data: OpenRouterResponse): string {
-        if (!data?.choices?.[0]?.message?.content) {
-            throw new AIError('Invalid or empty response from AI', 'INVALID_RESPONSE');
-        }
-    
-        let content = data.choices[0].message.content.trim();
-        if (!content) {
-            throw new AIError('AI returned an empty command', 'EMPTY_COMMAND');
-        }
-    
-        // Take only the first non-empty line as the command
-        const lines = content.split(/\r?\n/).map(line => line.trim());
-        const firstValidLine = lines.find(line => line.length > 0);
-        
-        if (!firstValidLine) {
-            throw new AIError('No valid command found in AI response', 'INVALID_RESPONSE');
-        }
-    
-        // Remove any command repetitions before returning
-        return this.removeCommandRepetitions(firstValidLine);
-    }
-    
-
-    private static cleanCommand(command: string): string {
-        // First, clean the basic formatting
-        let cleanedCommand = command
-            .trim();
-    
-        // Store URLs temporarily with a placeholder
-        const urls: string[] = [];
-        cleanedCommand = cleanedCommand.replace(/(https?:\/\/[^\s]+)/g, (match) => {
-            urls.push(match);
-            return `__URL${urls.length - 1}__`;
-        });
-    
-        // Handle common commands with their parameters
-        const commonCommands = {
-            'ipconfig': ['/all', '/release', '/renew', '/flushdns'],
-            'dir': ['/a', '/b', '/s', '/w', '/p', '/o', '/ad'],
-            'netstat': ['-a', '-n', '-b', '-o'],
-            'ping': ['-t', '-a', '-n', '-l'],
-            'curl': ['-s', '-o', '-L', '-I', '-H']
-        };
-    
-        // Find the base command
-        const firstWord = cleanedCommand.split(' ')[0].toLowerCase();
-        
-        if (commonCommands[firstWord as keyof typeof commonCommands]) {
-            // Extract all valid parameters for this command
-            const validParams = commonCommands[firstWord as keyof typeof commonCommands];
-            const params = new Set<string>();
-            
-            // Find all parameters in the command
-            const paramMatches = cleanedCommand.match(/\/[a-zA-Z]+|-[a-zA-Z]+/g) || [];
-            
-            // Keep only valid, unique parameters
-            paramMatches.forEach(param => {
-                if (validParams.includes(param.toLowerCase())) {
-                    params.add(param.toLowerCase());
-                }
-            });
-    
-            // Reconstruct the command with unique parameters
-            cleanedCommand = firstWord + ' ' + Array.from(params).join(' ');
-        } else {
-            // For unknown commands, just take the first instance of the command and its immediate parameters
-            const parts = cleanedCommand.split(' ');
-            const baseCommand = parts[0];
-            let parameters = [];
-            
-            // Collect parameters until we hit another instance of the base command
-            for (let i = 1; i < parts.length; i++) {
-                if (parts[i].toLowerCase() === baseCommand.toLowerCase()) {
-                    break;
-                }
-                parameters.push(parts[i]);
-            }
-            
-            cleanedCommand = baseCommand + (parameters.length ? ' ' + parameters.join(' ') : '');
-        }
-    
-        // Restore URLs
-        urls.forEach((url, index) => {
-            cleanedCommand = cleanedCommand.replace(`__URL${index}__`, url);
-        });
-    
-        // Fix path separators (only for Windows paths, not URLs or parameters)
-        cleanedCommand = cleanedCommand.replace(/(?<!http:|https:)\/\//g, '\\');
-    
-        // Ensure command doesn't start with an invalid character
-        if (/^[^a-zA-Z0-9]/.test(cleanedCommand)) {
-            throw new AIError('Invalid command structure', 'INVALID_COMMAND');
-        }
-    
-        return cleanedCommand;
-    }
-    
-    
-    private static validateCommand(command: string): void {
-        if (!command) {
-            throw new AIError('Command is empty after cleaning', 'EMPTY_COMMAND');
-        }
-    
-        if (this.requiresAdminPrivileges(command)) {
-            throw new AIError('This command requires administrator privileges', 'ADMIN_REQUIRED');
-        }
-    
-        // Updated redirection validation to allow for complex commands
-        // Allow multiple redirections if they're part of different command segments (separated by & or |)
-        const commandSegments = command.split(/[&|]/);
-        for (const segment of commandSegments) {
-            // Count redirections within each command segment
-            const redirectionCount = (segment.match(/(?<!>)>/g) || []).length;
-            if (redirectionCount > 1) {
-                throw new AIError('Too many output redirections in a single command segment', 'INVALID_REDIRECTION');
-            }
-        }
-    }
-    
-
-    private static requiresAdminPrivileges(command: string): boolean {
-        const commandLower = command.toLowerCase();
-        return Array.from(this.ADMIN_COMMANDS).some(adminCmd => 
-            commandLower.includes(adminCmd.toLowerCase())
-        );
-    }
-
-    static async generateCommand(userInput: string): Promise<[string, string?]> {
-        try {
-            if (!userInput?.trim()) {
-                throw new AIError('User input is required', 'INVALID_INPUT');
-            }
-
-            const response = await this.fetchWithRetry(this.API_URL, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ prompt: this.createPrompt(userInput) })
-            });
-
-            const data: OpenRouterResponse = await response.json();
-            const command = this.validateResponse(data);
-            this.validateCommand(command);
-
-            return [command];
-        } catch (error) {
-            if (error instanceof AIError) {
-                throw error;
-            }
-            throw new Error('An unexpected error occurred during command generation');
-        }
-    }
+  }
 }
