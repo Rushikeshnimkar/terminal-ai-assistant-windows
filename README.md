@@ -1,81 +1,300 @@
-# Terminal AI Assistant
+# Terminal AI Assistant (T-AI)
 
-A powerful CLI tool that helps users interact with the Windows command line using natural language. Built with Node.js and powered by Qwen: Qwen2.5 VL 72B Instruct AI.
+<div align="center">
 
-## Features
+```
+           ⚡                                                    ⚡
+         ▄▄▄                                                  ▄▄▄
+       ▄█████▄                                              ▄█████▄
+      ███████████                                        ███████████
+     █████████████                                      █████████████
 
-- 🤖 Natural language to command conversion
-- 💻 Real-time command execution
-- 🛡️ Secure command handling
-- ⚡ Fast response times
-- 🖥️ Cross-platform support
+          ████████╗        █████╗        ██╗
+          ╚══██╔══╝       ██╔══██╗       ██║
+             ██║          ███████║       ██║
+             ██║          ██╔══██║       ██║
+             ██║          ██║  ██║       ██║
+             ╚═╝          ╚═╝  ╚═╝       ╚═╝
 
-## Installation
+                    YOUR AI-POWERED TERMINAL ASSISTANT
+```
+
+[![npm version](https://img.shields.io/npm/v/terminal-ai-assistant.svg)](https://www.npmjs.com/package/terminal-ai-assistant)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Node.js Version](https://img.shields.io/badge/node-%3E%3D14.0.0-brightgreen)](https://nodejs.org/)
+
+**Transform natural language into powerful terminal commands with AI**
+
+[Features](#-features) • [Installation](#-installation) • [Usage](#-usage) • [Examples](#-examples) • [Documentation](#-documentation)
+
+</div>
+
+---
+
+## 🌟 Overview
+
+T-AI (Terminal AI Assistant) is a cutting-edge CLI tool that bridges the gap between human language and terminal commands. Powered by MiniMax M2 AI, it understands your intent and generates precise, executable commands while keeping your workflow secure and efficient.
+
+### Why T-AI?
+-Because you don't remember the command 🥲
+
+---
+
+## ✨ Features
+
+### 🎯 Command Mode
+- Natural language to Windows CMD commands
+- AI reasoning display
+- Automatic safety checks for dangerous commands
+- Interactive confirmation for destructive operations
+- Real-time command output streaming
+
+### 💬 Chat Mode
+- Interactive conversations with AI assistant
+- Beautiful markdown rendering (code blocks, tables, lists)
+- Context-aware responses with conversation history
+- Session management (clear history, start fresh)
+
+### 🛡️ Security
+- Admin command detection
+- Dangerous operation warnings
+- System path protection
+- User confirmation for risky commands
+
+---
+
+## 📦 Installation
+
+### Global Installation (Recommended)
 
 ```bash
 npm install -g terminal-ai-assistant
 ```
 
-## Usage
-
-After installation, you can use the `tai` command followed by your natural language query:
+### Local Installation
 
 ```bash
-tai "create a new folder called projects"
-tai "list all files in current directory"
-tai "find all pdf files in downloads folder"
+npm install terminal-ai-assistant
 ```
 
-## Examples
+### From Source
 
-### File operations:
 ```bash
-tai "create a backup of important.txt"
-tai "delete all temporary files"
-tai "move all images to pictures folder"
+git clone https://github.com/Rushikeshnimkar/terminal-ai-assistant-windows
+cd terminal-ai-assistant-windows
+npm install
+npm run build
+npm link
 ```
 
-### System information:
+---
+
+## 🚀 Usage
+
+### Command Mode
+
+Generate and execute commands from natural language:
+
 ```bash
-tai "show system information"
-tai "list running processes"
-tai "check disk space"
+t-ai "create a new folder called projects"
+t-ai "list all files in current directory"
+t-ai "find all pdf files"
 ```
 
-### Network commands:
+#### With Options
+
 ```bash
-tai "show my ip address"
-tai "test internet connection"
+# Start a new conversation (clears history)
+t-ai -n "show disk space"
+
+# Enable debug mode
+t-ai -d "copy files"
+
+# Display help
+t-ai --help
 ```
 
-## Project Structure
+### Interactive Chat Mode
+
+Start a conversation with your AI assistant:
+
+```bash
+t-ai chat
+```
+
+#### Chat Commands
+- Type your questions or requests naturally
+- `exit` or `quit` - End the chat session
+- `clear` - Clear conversation history
+- `banner` - Show the T-AI banner again
+- Press Enter on empty input to skip
+
+#### Chat Example
+
+```
+❯ How do I check my system's IP address?
+
+╭─ T-AI
+│
+│ ▓▓ IP Address Checking ▓▓
+│
+│ You can check your system's IP address using several methods:
+│
+│   1. Using ipconfig command
+│   2. Using PowerShell
+│   3. Via Network Settings
+│
+│ ┌─ cmd ─
+│ │ ipconfig | findstr IPv4
+│ └─
+│
+│ This will display your IPv4 address for all network adapters.
+│
+╰─ 14:30:25
+```
+
+### History Management
+
+```bash
+# Clear conversation history
+t-ai clear-history
+
+# Start fresh conversation in chat mode
+t-ai chat -n
+```
+
+---
+
+## 💡 Examples
+
+### File Operations
+
+```bash
+t-ai "create a backup folder and a readme file inside it"
+t-ai "copy all .txt files to backup folder"
+t-ai "delete all temporary files older than 30 days"
+```
+
+### System Information
+
+```bash
+t-ai "show me detailed system information"
+t-ai "check disk space on all drives"
+t-ai "list all running processes"
+```
+
+### Network Commands
+
+```bash
+t-ai "show my IP address and network configuration"
+t-ai "test internet connection to google.com"
+t-ai "find which process is using port 8080"
+```
+
+---
+
+## 🏗️ Project Structure
 
 ```
 terminal-ai-assistant/
-├── src/ # Source files
-│ ├── services/ # Service layer
-│ │ ├── aiService.ts # AI command generation
-│ │ └── commandService.ts # Command execution
-│ ├── types/ # TypeScript types
-│ └── cli.ts # CLI entry point
-├── tsconfig.json # TypeScript configuration
-└── package.json # Project configuration
+├── src/
+│   ├── cli.ts                    # Main CLI entry point with command routing
+│   ├── services/
+│   │   ├── aiService.ts          # AI API integration and response handling
+│   │   ├── commandService.ts     # Command execution with real-time streaming
+│   │   ├── historyService.ts     # Conversation history management
+│   │   └── fileSystemService.ts  # File system utilities and safety checks
+│   ├── types/
+│   │   └── index.ts              # TypeScript type definitions
+│   └── utils/
+│       └── prompt.ts             # User interaction utilities
+├── dist/                         # Compiled JavaScript output
+├── package.json                  # Project configuration and dependencies
+├── tsconfig.json                 # TypeScript configuration
+└── README.md                     # This file
 ```
 
-## Technology Stack
+---
 
-- 🟦 TypeScript - Type safety and modern JavaScript features
-- 🤖 Qwen: Qwen2.5 VL 72B Instruct - Advanced AI model for command generation
-- 🎨 Chalk - Beautiful terminal output
-- 📝 Commander.js - CLI framework
+## 🔧 Technology Stack
 
-## Security Features
+| Technology | Purpose |
+|------------|---------|
+| **TypeScript** | Type-safe development with modern JavaScript features |
+| **Node.js** | Runtime environment for CLI application |
+| **MiniMax M2** | Advanced AI model for command generation and chat |
+| **Commander.js** | Robust CLI framework with command parsing |
+| **Chalk** | Beautiful terminal string styling |
+| **Marked** | Markdown parsing for chat responses |
+| **Marked-Terminal** | Terminal-optimized markdown rendering |
+| **Readline-Sync** | Synchronous user input handling |
+| **FS-Extra** | Enhanced file system operations |
 
-- Admin command detection
-- Secure command execution
-- Input sanitization
+---
 
-## Contributing
+## 🛡️ Security
+
+T-AI includes built-in safety features:
+
+- **Dangerous Command Detection**: Warns before executing destructive operations
+- **Admin Privilege Alerts**: Flags commands requiring elevated access
+- **System Path Protection**: Prevents accidental system directory modifications
+- **User Confirmation**: Requires approval for risky commands like `del`, `format`, `diskpart`
+
+```bash
+# Example: T-AI will warn you before executing dangerous commands
+t-ai "delete all files in system32"
+
+# Output:
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃  ⚠  WARNING: POTENTIALLY DANGEROUS  ┃
+┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
+
+▶ Execute this command? (y/n)
+```
+
+---
+
+## 🎨 Output Formatting
+
+### Command Mode
+```
+┌─ AI Analysis ─
+│ Creating a new directory named 'projects'
+└─
+
+┌─ Generated Command ─
+│ mkdir projects
+└─
+
+✓ Command completed successfully
+```
+
+### Chat Mode
+- Formatted headings, lists, and tables
+- Syntax-highlighted code blocks
+- Styled blockquotes and emphasis
+- Timestamped responses
+
+---
+
+
+
+## 🤝 Contributing
+
+Contributions are welcome!
+
+```bash
+# Clone and setup
+git clone https://github.com/Rushikeshnimkar/terminal-ai-assistant-windows
+cd terminal-ai-assistant-windows
+npm install
+npm run build
+npm link
+
+# Test your changes
+t-ai "test command"
+```
 
 1. Fork the repository
 2. Create your feature branch (`git checkout -b feature/AmazingFeature`)
@@ -83,16 +302,27 @@ terminal-ai-assistant/
 4. Push to the branch (`git push origin feature/AmazingFeature`)
 5. Open a Pull Request
 
-## License
+---
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+## 📝 Version History
 
-## Author
+- **v1.0.19** - Current release with enhanced chat mode and markdown rendering
+- **v1.0.8** - Added interactive chat mode and custom ASCII banner
+- **v1.0.0** - Initial release
 
-Rushikesh Nimkar
+---
 
-## Acknowledgments
+## 💬 Support
 
-- [Qwen AI](https://qwen.ai)
-- [Node.js](https://nodejs.org/)
-- [Commander.js](https://github.com/tj/commander.js/)
+Need help? 
+
+- Check [existing issues](https://github.com/Rushikeshnimkar/terminal-ai-assistant-windows/issues)
+- Open a [new issue](https://github.com/Rushikeshnimkar/terminal-ai-assistant-windows/issues/new)
+- Star the repo ⭐ if you find it helpful!
+
+---
+
+
+[⬆ Back to Top](#terminal-ai-assistant-t-ai)
+
+</div>
