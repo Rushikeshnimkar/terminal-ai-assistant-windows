@@ -19,7 +19,6 @@
                     YOUR AI-POWERED TERMINAL ASSISTANT
 ```
 
-
 **Transform natural language into powerful terminal commands with AI**
 
 [Features](#-features) • [Installation](#-installation) • [Usage](#-usage) • [Examples](#-examples) • [Documentation](#-documentation)
@@ -33,6 +32,7 @@
 T-AI (Terminal AI Assistant) is a cutting-edge CLI tool that bridges the gap between human language and terminal commands. Powered by MiniMax M2 AI, it understands your intent and generates precise, executable commands while keeping your workflow secure and efficient.
 
 ### Why T-AI?
+
 -Because you don't remember the command 🥲
 
 ---
@@ -40,6 +40,7 @@ T-AI (Terminal AI Assistant) is a cutting-edge CLI tool that bridges the gap bet
 ## ✨ Features
 
 ### 🎯 Command Mode
+
 - Natural language to Windows CMD commands
 - AI reasoning display
 - Automatic safety checks for dangerous commands
@@ -47,12 +48,14 @@ T-AI (Terminal AI Assistant) is a cutting-edge CLI tool that bridges the gap bet
 - Real-time command output streaming
 
 ### 💬 Chat Mode
+
 - Interactive conversations with AI assistant
 - Beautiful markdown rendering (code blocks, tables, lists)
 - Context-aware responses with conversation history
 - Session management (clear history, start fresh)
 
 ### 🛡️ Security
+
 - Admin command detection
 - Dangerous operation warnings
 - System path protection
@@ -120,6 +123,7 @@ t-ai chat
 ```
 
 #### Chat Commands
+
 - Type your questions or requests naturally
 - `exit` or `quit` - End the chat session
 - `clear` - Clear conversation history
@@ -215,17 +219,17 @@ terminal-ai-assistant/
 
 ## 🔧 Technology Stack
 
-| Technology | Purpose |
-|------------|---------|
-| **TypeScript** | Type-safe development with modern JavaScript features |
-| **Node.js** | Runtime environment for CLI application |
-| **MiniMax M2** | Advanced AI model for command generation and chat |
-| **Commander.js** | Robust CLI framework with command parsing |
-| **Chalk** | Beautiful terminal string styling |
-| **Marked** | Markdown parsing for chat responses |
-| **Marked-Terminal** | Terminal-optimized markdown rendering |
-| **Readline-Sync** | Synchronous user input handling |
-| **FS-Extra** | Enhanced file system operations |
+| Technology                | Purpose                                               |
+| ------------------------- | ----------------------------------------------------- |
+| **TypeScript**      | Type-safe development with modern JavaScript features |
+| **Node.js**         | Runtime environment for CLI application               |
+| **MiniMax M2**      | Advanced AI model for command generation and chat     |
+| **Commander.js**    | Robust CLI framework with command parsing             |
+| **Chalk**           | Beautiful terminal string styling                     |
+| **Marked**          | Markdown parsing for chat responses                   |
+| **Marked-Terminal** | Terminal-optimized markdown rendering                 |
+| **Readline-Sync**   | Synchronous user input handling                       |
+| **FS-Extra**        | Enhanced file system operations                       |
 
 ---
 
@@ -255,6 +259,7 @@ t-ai "delete all files in system32"
 ## 🎨 Output Formatting
 
 ### Command Mode
+
 ```
 ┌─ AI Analysis ─
 │ Creating a new directory named 'projects'
@@ -268,14 +273,13 @@ t-ai "delete all files in system32"
 ```
 
 ### Chat Mode
+
 - Formatted headings, lists, and tables
 - Syntax-highlighted code blocks
 - Styled blockquotes and emphasis
 - Timestamped responses
 
 ---
-
-
 
 ## 🤝 Contributing
 
@@ -303,7 +307,7 @@ t-ai "test command"
 
 ## 📝 Version History
 
-- **v1.0.19** - Current release with enhanced chat mode and markdown rendering
+- **v1.1.1** - Current release with enhanced chat mode and markdown rendering
 - **v1.0.8** - Added interactive chat mode and custom ASCII banner
 - **v1.0.0** - Initial release
 
@@ -311,14 +315,13 @@ t-ai "test command"
 
 ## 💬 Support
 
-Need help? 
+Need help?
 
 - Check [existing issues](https://github.com/Rushikeshnimkar/terminal-ai-assistant-windows/issues)
 - Open a [new issue](https://github.com/Rushikeshnimkar/terminal-ai-assistant-windows/issues/new)
 - Star the repo ⭐ if you find it helpful!
 
 ---
-
 
 [⬆ Back to Top](#terminal-ai-assistant-t-ai)
 

@@ -6,6 +6,8 @@ import { AIService } from "./services/aiService.js";
 import { executeCommand } from "./services/commandService.js";
 import { HistoryService } from "./services/historyService.js";
 import { promptConfirmation } from "./utils/prompt.js";
+import { GithubService } from "./services/githubService.js";
+import { spawn } from "child_process";
 
 // --- NEW IMPORTS ---
 import readlineSync from "readline-sync";
@@ -84,6 +86,92 @@ const banner = `
 
 `;
 
+const runShell = (cmd: string): Promise<boolean> => {
+  return new Promise((resolve) => {
+    const [command, ...args] = cmd.split(" ");
+    const child = spawn(command, args, { stdio: "inherit" });
+    child.on("close", (code) => resolve(code === 0));
+    child.on("error", () => resolve(false));
+  });
+};
+// --- Add this new command structure ---
+const githubCommand = program
+  .command("github")
+  .description("Connect and interact with your GitHub account");
+
+githubCommand
+  .command("login")
+  .description("Authenticate with GitHub via OAuth Device Flow")
+  .action(async () => {
+    try {
+      await GithubService.login();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error(chalk.red(`\n✗ Login failed: ${message}\n`));
+    }
+  });
+
+githubCommand
+  .command("list-repos")
+  .description("List your GitHub repositories")
+  .action(async () => {
+    try {
+      spinner.start("Fetching your repos...");
+      const repos = await GithubService.listRepos();
+      spinner.stop();
+      console.log(chalk.bold.cyan("Your GitHub Repositories:"));
+      repos.forEach((repo) => console.log(chalk.white(`  • ${repo}`)));
+    } catch (error) {
+      spinner.stop();
+      const message = error instanceof Error ? error.message : String(error);
+      console.error(chalk.red(`\n✗ Error: ${message}\n`));
+    }
+  });
+
+// --- THIS IS THE SEAMLESS WORKFLOW COMMAND ---
+githubCommand
+  .command("init-and-push")
+  .description("Initialize a local folder and push it as a new GitHub repo")
+  .action(async () => {
+    try {
+      const repoName = readlineSync.question(
+        chalk.yellow("Enter a name for your new GitHub repo: ")
+      );
+      const isPrivate = readlineSync.keyInYNStrict(
+        chalk.yellow("Make this repo private? ")
+      );
+
+      spinner.start(`Creating '${repoName}' on GitHub...`);
+      const cloneUrl = await GithubService.createRemoteRepo(
+        repoName,
+        isPrivate
+      );
+      spinner.stop();
+      console.log(chalk.green(`✅ Repo created at ${cloneUrl}`));
+
+      spinner.start("Initializing local git repository...");
+      if (
+        !(await runShell("git init")) ||
+        !(await runShell("git add .")) ||
+        !(await runShell('git commit -m "Initial commit"')) ||
+        !(await runShell("git branch -M main")) ||
+        !(await runShell(`git remote add origin ${cloneUrl}`)) ||
+        !(await runShell("git push -u origin main"))
+      ) {
+        throw new Error("A git command failed. Please check your console.");
+      }
+      spinner.stop();
+      console.log(
+        chalk.green.bold(
+          "\n✨ Successfully initialized and pushed to GitHub! ✨"
+        )
+      );
+    } catch (error) {
+      spinner.stop();
+      const message = error instanceof Error ? error.message : String(error);
+      console.error(chalk.red(`\n✗ Error: ${message}\n`));
+    }
+  });
 // --- NEW: Setup Custom Terminal Renderer ---
 const terminalRenderer: RendererObject = {
   // Block-level tokens

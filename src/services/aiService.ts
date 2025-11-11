@@ -5,6 +5,8 @@ import { HistoryService } from "./historyService.js";
 import dotenv from "dotenv";
 import path from "path";
 import os from "os";
+import { getCommandOutput } from "./commandService.js"; // Import new function
+import { FileSystemService } from "./fileSystemService.js";
 
 // Load environment variables (for user settings, NOT API keys)
 dotenv.config({ path: path.join(os.homedir(), ".terminal-ai", ".env") });
@@ -27,7 +29,35 @@ export class AIService {
   // *****************************************************************
   private static readonly API_URL = "https://terminal-ai-api.vercel.app/api";
   private static readonly CURRENT_DIR = process.cwd();
+  private static async getGitContext(): Promise<string> {
+    try {
+      // Check if .git folder exists
+      const inGitRepo = await FileSystemService.directoryExists(".git");
+      if (!inGitRepo) return "";
 
+      // Get status, branch, and remote info
+      const [status, branch, remote] = await Promise.all([
+        getCommandOutput("git status --porcelain"),
+        getCommandOutput("git rev-parse --abbrev-ref HEAD"),
+        getCommandOutput("git remote -v"),
+      ]);
+
+      let context = "\n--- Git Context ---\n";
+      context += `Current Branch: ${branch}\n`;
+      if (status) {
+        context += `Status (porcelain):\n${status}\n`;
+      } else {
+        context += "Status: Clean\n";
+      }
+      if (remote) {
+        context += `Remotes:\n${remote}\n`;
+      }
+      context += "--- End Git Context ---\n";
+      return context;
+    } catch (error) {
+      return ""; // Fail silently, don't break the AI
+    }
+  }
   // (Your ADMIN_COMMANDS and FILE_OPERATION_COMMANDS sets are fine)
   private static readonly ADMIN_COMMANDS: Set<string> = new Set([
     "netsh",
@@ -129,6 +159,9 @@ export class AIService {
       }
 
       await HistoryService.init();
+      const gitContext = await this.getGitContext();
+      const promptWithContext = userInput + gitContext;
+      // --- END NEW ---
       // We no longer need createPrompt, the backend does it.
       // We just send the raw user input.
 
@@ -136,7 +169,7 @@ export class AIService {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          prompt: userInput, // Send raw user input
+          prompt: promptWithContext, // Send raw user input
           mode: "command", // Tell the backend to use command mode
         }),
       });

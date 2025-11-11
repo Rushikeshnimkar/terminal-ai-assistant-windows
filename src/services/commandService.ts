@@ -39,3 +39,26 @@ export const executeCommand = async (
     });
   });
 };
+
+// --- ADD THIS NEW FUNCTION ---
+// This version runs a command silently and returns the output
+export const getCommandOutput = async (command: string): Promise<string> => {
+  return new Promise((resolve, reject) => {
+    const [cmd, ...args] = command.split(" ");
+    const child = spawn(cmd, args, { shell: true }); // Use shell for safety
+    let stdout = "";
+    let stderr = "";
+
+    child.stdout.on("data", (data) => (stdout += data.toString()));
+    child.stderr.on("data", (data) => (stderr += data.toString()));
+
+    child.on("close", (code) => {
+      if (code === 0) {
+        resolve(stdout.trim());
+      } else {
+        reject(stderr.trim());
+      }
+    });
+    child.on("error", (err) => reject(err.message));
+  });
+};
