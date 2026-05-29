@@ -1,12 +1,16 @@
 // services/aiService.ts
 
+import crypto from "crypto";
 import chalk from "chalk";
 import { HistoryService } from "./historyService.js";
 import dotenv from "dotenv";
 import path from "path";
 import os from "os";
-import { getCommandOutput } from "./commandService.js"; // Import new function
+// --- NEW ---
+// We will need the getCommandOutput function for the Git-Aware feature
+import { getCommandOutput } from "./commandService.js";
 import { FileSystemService } from "./fileSystemService.js";
+import { detectShell } from "../utils/shell.js";
 
 // Load environment variables (for user settings, NOT API keys)
 dotenv.config({ path: path.join(os.homedir(), ".terminal-ai", ".env") });
@@ -14,6 +18,29 @@ dotenv.config({ path: path.join(os.homedir(), ".terminal-ai", ".env") });
 interface AICommandResponse {
   reasoning: string;
   command: string;
+}
+
+// --- NEW: Type for our new function's payload ---
+interface ApiPayload {
+  prompt: string;
+  mode: "command" | "chat" | "fix";
+  history?: Array<{ role: "user" | "assistant"; content: string }>;
+  conversationId?: string;
+  shell?: string;
+  failedCommand?: string;
+  errorOutput?: string;
+  originalQuery?: string;
+}
+
+// --- NEW: Type for the Vercel API response ---
+// Based on the code in your API file
+interface ApiResponse {
+  choices: Array<{
+    message: {
+      content: string;
+    };
+  }>;
+  conversationId: string;
 }
 
 class AIError extends Error {
@@ -24,41 +51,10 @@ class AIError extends Error {
 }
 
 export class AIService {
-  // *****************************************************************
-  // *** KEY CHANGE: ONLY ONE API URL, NO LOCAL API KEYS ***
-  // *****************************************************************
   private static readonly API_URL = "https://terminal-ai-api.vercel.app/api";
   private static readonly CURRENT_DIR = process.cwd();
-  private static async getGitContext(): Promise<string> {
-    try {
-      // Check if .git folder exists
-      const inGitRepo = await FileSystemService.directoryExists(".git");
-      if (!inGitRepo) return "";
 
-      // Get status, branch, and remote info
-      const [status, branch, remote] = await Promise.all([
-        getCommandOutput("git status --porcelain"),
-        getCommandOutput("git rev-parse --abbrev-ref HEAD"),
-        getCommandOutput("git remote -v"),
-      ]);
-
-      let context = "\n--- Git Context ---\n";
-      context += `Current Branch: ${branch}\n`;
-      if (status) {
-        context += `Status (porcelain):\n${status}\n`;
-      } else {
-        context += "Status: Clean\n";
-      }
-      if (remote) {
-        context += `Remotes:\n${remote}\n`;
-      }
-      context += "--- End Git Context ---\n";
-      return context;
-    } catch (error) {
-      return ""; // Fail silently, don't break the AI
-    }
-  }
-  // (Your ADMIN_COMMANDS and FILE_OPERATION_COMMANDS sets are fine)
+  // (ADMIN_COMMANDS and FILE_OPERATION_COMMANDS sets remain unchanged)
   private static readonly ADMIN_COMMANDS: Set<string> = new Set([
     "netsh",
     "net",
@@ -96,7 +92,7 @@ export class AIService {
     "rename",
   ]);
 
-  // (isPotentiallyDangerous is fine)
+  // (isPotentiallyDangerous remains unchanged)
   static isPotentiallyDangerous(command: string): boolean {
     const commandLower = command.toLowerCase();
     if (
@@ -116,7 +112,7 @@ export class AIService {
     return false;
   }
 
-  // (parseAICommandResponse is fine)
+  // (parseAIResponse remains unchanged)
   private static parseAIResponse(responseText: string): AICommandResponse {
     try {
       const jsonMatch = responseText.match(/\{[\s\S]*\}/);
@@ -149,9 +145,71 @@ export class AIService {
     }
   }
 
-  // *****************************************************************
-  // *** generateCommand: SENDS "mode": "command" ***
-  // *****************************************************************
+  // --- NEW: Helper to get Git context (from our previous discussion) ---
+  private static async getGitContext(): Promise<string> {
+    try {
+      const inGitRepo = await FileSystemService.directoryExists(".git");
+      if (!inGitRepo) return "";
+
+      const [status, branch, remote] = await Promise.all([
+        getCommandOutput("git status --porcelain").catch(() => ""),
+        getCommandOutput("git rev-parse --abbrev-ref HEAD").catch(() => ""),
+        getCommandOutput("git remote -v").catch(() => ""),
+      ]);
+
+      let context = "\n\n--- Git Context ---\n";
+      context += `Current Branch: ${branch || "unknown"}\n`;
+      if (status) {
+        context += `Status (porcelain):\n${status}\n`;
+      } else {
+        context += "Status: Clean\n";
+      }
+      if (remote) {
+        context += `Remotes:\n${remote}\n`;
+      }
+      context += "--- End Git Context ---\n";
+      return context;
+    } catch (error) {
+      return ""; // Fail silently
+    }
+  }
+
+  private static getHandshakeHeaders(): Record<string, string> {
+    const timestamp = Math.floor(Date.now() / 30000); // 30-second window
+    const SALT_PARTS = ["tai", "terminal", "assistant", "super", "secret", "salt", "2026"];
+    const secret = SALT_PARTS.join("-");
+    
+    const hmac = crypto.createHmac("sha256", secret);
+    hmac.update(String(timestamp));
+    const signature = hmac.digest("hex");
+
+    return {
+      "X-T-AI-Signature": signature,
+      "X-T-AI-Timestamp": String(timestamp),
+    };
+  }
+
+  // --- NEW: Refactored private callAPI method (as per your suggestion) ---
+  private static async callAPI(payload: ApiPayload): Promise<ApiResponse> {
+    const handshakeHeaders = this.getHandshakeHeaders();
+    const response = await fetch(this.API_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...handshakeHeaders,
+      },
+      body: JSON.stringify(payload),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`API Error (${response.status}): ${errorText}`);
+    }
+
+    return response.json();
+  }
+
+  // --- UPDATED: generateCommand ---
   static async generateCommand(userInput: string): Promise<[string, string]> {
     try {
       if (!userInput?.trim()) {
@@ -159,30 +217,28 @@ export class AIService {
       }
 
       await HistoryService.init();
+
+      // Get Git context
       const gitContext = await this.getGitContext();
       const promptWithContext = userInput + gitContext;
-      // --- END NEW ---
-      // We no longer need createPrompt, the backend does it.
-      // We just send the raw user input.
 
-      const response = await fetch(this.API_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          prompt: promptWithContext, // Send raw user input
-          mode: "command", // Tell the backend to use command mode
-        }),
+      // Get recent history
+      const recentHistory = await HistoryService.getRecentHistory(10);
+      const formattedHistory = recentHistory.map((h) => ({
+        role: h.role,
+        content: h.content,
+      }));
+
+      // Call the new refactored method
+      const data = await this.callAPI({
+        prompt: promptWithContext,
+        mode: "command",
+        history: formattedHistory,
+        shell: detectShell(),
       });
 
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`API Error: ${errorText}`);
-      }
-
-      const data = await response.json();
       const aiRawText = data.choices[0]?.message?.content || "";
 
-      // Parse the JSON response that the AI *text* contains
       const { reasoning, command } = this.parseAIResponse(aiRawText);
 
       await HistoryService.addMessage("user", userInput);
@@ -198,9 +254,7 @@ export class AIService {
     }
   }
 
-  // *****************************************************************
-  // *** generateLlmResponse: SENDS "mode": "chat" ***
-  // *****************************************************************
+  // --- UPDATED: generateLlmResponse ---
   static async generateLlmResponse(userInput: string): Promise<string> {
     try {
       if (!userInput?.trim()) {
@@ -209,13 +263,75 @@ export class AIService {
 
       await HistoryService.init();
 
+      // Get Git context
+      const gitContext = await this.getGitContext();
+      const promptWithContext = userInput + gitContext;
+
+      // Get recent history
+      const recentHistory = await HistoryService.getRecentHistory(10);
+      const formattedHistory = recentHistory.map((h) => ({
+        role: h.role,
+        content: h.content,
+      }));
+
+      // Call the new refactored method
+      const data = await this.callAPI({
+        prompt: promptWithContext,
+        mode: "chat",
+        history: formattedHistory,
+      });
+
+      const aiResponse =
+        data.choices[0]?.message?.content || "Sorry, I had trouble thinking.";
+
+      await HistoryService.addMessage("user", userInput);
+      await HistoryService.addMessage("assistant", aiResponse);
+
+      return aiResponse;
+    } catch (error) {
+      throw new Error(
+        `LLM response failed: ${
+          error instanceof Error ? error.message : "Unknown error"
+        }`
+      );
+    }
+  }
+
+  // --- NEW: generateLlmResponseStream ---
+  static async generateLlmResponseStream(
+    userInput: string,
+    onChunk: (text: string) => void
+  ): Promise<string> {
+    try {
+      if (!userInput?.trim()) {
+        throw new Error("User input is required");
+      }
+
+      await HistoryService.init();
+
+      // Get Git context
+      const gitContext = await this.getGitContext();
+      const promptWithContext = userInput + gitContext;
+
+      // Get recent history
+      const recentHistory = await HistoryService.getRecentHistory(10);
+      const formattedHistory = recentHistory.map((h) => ({
+        role: h.role,
+        content: h.content,
+      }));
+
+      const handshakeHeaders = this.getHandshakeHeaders();
+      // Call Vercel API via fetch directly to consume the readable stream
       const response = await fetch(this.API_URL, {
-        // Use SAME Vercel API
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...handshakeHeaders,
+        },
         body: JSON.stringify({
-          prompt: userInput, // Send raw user input
-          mode: "chat", // Tell the backend to use chat mode
+          prompt: promptWithContext,
+          mode: "chat",
+          history: formattedHistory,
         }),
       });
 
@@ -224,18 +340,78 @@ export class AIService {
         throw new Error(`API Error (${response.status}): ${errorText}`);
       }
 
-      const data = await response.json();
-      const aiResponse =
-        data.choices[0]?.message?.content || "Sorry, I had trouble thinking.";
+      const reader = response.body;
+      if (!reader) {
+        throw new Error("No readable stream in response body");
+      }
 
-      // Save to history
+      let fullResponse = "";
+      const decoder = new TextDecoder();
+
+      const streamReader = reader.getReader();
+      while (true) {
+        const { done, value } = await streamReader.read();
+        if (done) break;
+
+        const chunk = decoder.decode(value, { stream: true });
+        const lines = chunk.split("\n");
+
+        for (const line of lines) {
+          const cleaned = line.trim();
+          if (cleaned.startsWith("data: ")) {
+            const dataStr = cleaned.slice(6).trim();
+            if (dataStr === "[DONE]") continue;
+
+            try {
+              const parsed = JSON.parse(dataStr);
+              const delta = parsed.choices?.[0]?.delta?.content || "";
+              if (delta) {
+                fullResponse += delta;
+                onChunk(delta);
+              }
+            } catch (err) {
+              // Ignore split JSON chunks errors
+            }
+          }
+        }
+      }
+
+      // Add to history
       await HistoryService.addMessage("user", userInput);
-      await HistoryService.addMessage("assistant", aiResponse);
+      await HistoryService.addMessage("assistant", fullResponse);
 
-      return aiResponse;
+      return fullResponse;
     } catch (error) {
       throw new Error(
-        `LLM response failed: ${
+        `LLM streaming response failed: ${
+          error instanceof Error ? error.message : "Unknown error"
+        }`
+      );
+    }
+  }
+
+  // --- NEW: generateFixCommand ---
+  static async generateFixCommand(
+    originalQuery: string,
+    failedCommand: string,
+    errorOutput: string
+  ): Promise<[string, string]> {
+    try {
+      const data = await this.callAPI({
+        prompt: originalQuery,
+        mode: "fix",
+        shell: detectShell(),
+        failedCommand,
+        errorOutput,
+        originalQuery,
+      });
+
+      const aiRawText = data.choices[0]?.message?.content || "";
+      const { reasoning, command } = this.parseAIResponse(aiRawText);
+      return [command, reasoning];
+    } catch (error) {
+      throw new Error(
+        `Command correction failed: ${
           error instanceof Error ? error.message : "Unknown error"
         }`
       );

@@ -88,12 +88,19 @@ const banner = `
 
 const runShell = (cmd: string): Promise<boolean> => {
   return new Promise((resolve) => {
-    const [command, ...args] = cmd.split(" ");
-    const child = spawn(command, args, { stdio: "inherit" });
+    // Pass the entire string and use { shell: true }
+    // This fixes the 'commit"' error.
+    const child = spawn(cmd, { stdio: "inherit", shell: true });
+
     child.on("close", (code) => resolve(code === 0));
-    child.on("error", () => resolve(false));
+    child.on("error", (err) => {
+      console.error(chalk.red(`runShell Error: ${err.message}`));
+      resolve(false);
+    });
   });
 };
+program.name("T-AI").description("AI-powered terminal assistant");
+
 // --- Add this new command structure ---
 const githubCommand = program
   .command("github")
@@ -128,7 +135,6 @@ githubCommand
     }
   });
 
-// --- THIS IS THE SEAMLESS WORKFLOW COMMAND ---
 githubCommand
   .command("init-and-push")
   .description("Initialize a local folder and push it as a new GitHub repo")
@@ -150,16 +156,21 @@ githubCommand
       console.log(chalk.green(`✅ Repo created at ${cloneUrl}`));
 
       spinner.start("Initializing local git repository...");
+
+      // --- THIS SECTION NOW WORKS ---
+      // The updated runShell() helper correctly handles the quoted commit message.
       if (
         !(await runShell("git init")) ||
         !(await runShell("git add .")) ||
-        !(await runShell('git commit -m "Initial commit"')) ||
+        !(await runShell('git commit -m "Initial commit"')) || // This command is now safe
         !(await runShell("git branch -M main")) ||
         !(await runShell(`git remote add origin ${cloneUrl}`)) ||
         !(await runShell("git push -u origin main"))
       ) {
         throw new Error("A git command failed. Please check your console.");
       }
+      // --- END OF FIX ---
+
       spinner.stop();
       console.log(
         chalk.green.bold(
@@ -168,10 +179,43 @@ githubCommand
       );
     } catch (error) {
       spinner.stop();
-      const message = error instanceof Error ? error.message : String(error);
-      console.error(chalk.red(`\n✗ Error: ${message}\n`));
+      console.error(
+        chalk.red(
+          `\n✗ Error: ${
+            error instanceof Error ? error.message : String(error)
+          }\n`
+        )
+      );
     }
   });
+function highlightSyntax(code: string, lang: string = ""): string {
+  const language = lang.toLowerCase();
+  const stringRegex = /(["'`])(.*?)\1/g;
+  const commentRegex = /(\/\/.*|#.*)/g;
+  const numberRegex = /\b(\d+)\b/g;
+
+  const bashKeywords = /\b(git|npm|npx|cd|mkdir|rmdir|rm|del|copy|xcopy|move|cls|dir|ls|cat|echo|set|export|env|powershell|pwsh|cmd|tsc|node|ts-node|vercel|docker|pm2)\b/g;
+  const jsKeywords = /\b(const|let|var|function|return|if|else|for|while|do|switch|case|break|continue|import|export|from|default|class|extends|new|this|async|await|try|catch|finally|throw|error|null|undefined|true|false)\b/g;
+  
+  let highlighted = code;
+
+  if (language === "bash" || language === "sh" || language === "powershell" || language === "pwsh" || language === "cmd" || language === "") {
+    highlighted = highlighted.replace(bashKeywords, (m) => chalk.cyan(m));
+    highlighted = highlighted.replace(/(\$[a-zA-Z_0-9]+|%[a-zA-Z_0-9]+%)/g, (m) => chalk.yellow(m));
+    highlighted = highlighted.replace(/( -[a-zA-Z0-9\-]+| --[a-zA-Z0-9\-]+)/g, (m) => chalk.gray(m));
+    highlighted = highlighted.replace(stringRegex, (m) => chalk.green(m));
+    highlighted = highlighted.replace(commentRegex, (m) => chalk.dim.gray(m));
+  } else if (language === "javascript" || language === "typescript" || language === "js" || language === "ts" || language === "json") {
+    highlighted = highlighted.replace(jsKeywords, (m) => chalk.blue(m));
+    highlighted = highlighted.replace(/([a-zA-Z_0-9]+)(?=\()/g, (m) => chalk.yellow(m));
+    highlighted = highlighted.replace(stringRegex, (m) => chalk.green(m));
+    highlighted = highlighted.replace(numberRegex, (m) => chalk.magenta(m));
+    highlighted = highlighted.replace(commentRegex, (m) => chalk.dim.gray(m));
+  }
+
+  return highlighted;
+}
+
 // --- NEW: Setup Custom Terminal Renderer ---
 const terminalRenderer: RendererObject = {
   // Block-level tokens
@@ -194,9 +238,10 @@ const terminalRenderer: RendererObject = {
 
   code({ text, lang }: Tokens.Code): string {
     const language = lang || "";
+    const highlightedCode = highlightSyntax(text, language);
     return `\n${chalk.dim(
       "┌─ " + (language ? chalk.cyan(language) : "code") + " ─"
-    )}\n${chalk.yellow("│ " + text.split("\n").join("\n│ "))}\n${chalk.dim(
+    )}\n${chalk.white("│ " + highlightedCode.split("\n").join("\n│ "))}\n${chalk.dim(
       "└─"
     )}\n\n`;
   },
@@ -420,6 +465,69 @@ program
           console.log(chalk.red("┌─ Error ─"));
           console.log(chalk.red("│ ") + result.error);
           console.log(chalk.red("└─\n"));
+
+          const shouldFix = await promptConfirmation(
+            chalk.yellow("▶ Let T-AI automatically fix this command? (y/n) ")
+          );
+
+          if (shouldFix) {
+            spinner.start("Analyzing error and generating correction...");
+            try {
+              const [fixedCommand, fixReasoning] = await AIService.generateFixCommand(
+                query,
+                command,
+                result.error || "Unknown exit status"
+              );
+              spinner.stop();
+
+              console.log(
+                chalk.cyan("┌─ ") + chalk.bold.cyan("AI Fix Explanation") + chalk.cyan(" ─")
+              );
+              console.log(chalk.cyan("│ ") + chalk.dim(fixReasoning));
+              console.log(chalk.cyan("└─\n"));
+
+              console.log(
+                chalk.yellow("┌─ ") +
+                  chalk.bold.yellow("Corrected Command") +
+                  chalk.yellow(" ─")
+              );
+              console.log(chalk.yellow("│ ") + chalk.bold.white(fixedCommand));
+              console.log(chalk.yellow("└─\n"));
+
+              const confirmedFix = await promptConfirmation(
+                chalk.yellow("▶ Execute this corrected command? (y/n) ")
+              );
+
+              if (confirmedFix) {
+                spinner.start("Executing corrected command...");
+                const fixResult = await executeCommand(fixedCommand);
+                spinner.stop();
+
+                if (fixResult.success) {
+                  console.log(chalk.green("✓ Command completed successfully\n"));
+                  if (fixResult.output) {
+                    console.log(chalk.dim("┌─ Output ─"));
+                    console.log(
+                      chalk.dim("│ ") + fixResult.output.split("\n").join("\n│ ")
+                    );
+                    console.log(chalk.dim("└─\n"));
+                  }
+                } else {
+                  console.log(chalk.red("✗ Corrected command also failed\n"));
+                  console.log(chalk.red("┌─ Error ─"));
+                  console.log(chalk.red("│ ") + fixResult.error);
+                  console.log(chalk.red("└─\n"));
+                }
+              }
+            } catch (fixError) {
+              spinner.stop();
+              console.error(
+                chalk.red("✗ Failed to get command correction: ") +
+                  (fixError instanceof Error ? fixError.message : "Unknown error") +
+                  "\n"
+              );
+            }
+          }
         }
       } catch (error) {
         spinner.stop();
@@ -510,22 +618,29 @@ program
         spinner.start("T-AI is thinking...");
 
         try {
-          const aiResponse = await AIService.generateLlmResponse(userInput);
-          spinner.stop();
+          let firstChunk = true;
 
-          const formattedResponse = marked.parse(aiResponse) as string;
+          const aiResponse = await AIService.generateLlmResponseStream(
+            userInput,
+            (chunk) => {
+              if (firstChunk) {
+                spinner.stop();
+                console.log(chalk.bold.magenta("\n╭─ T-AI"));
+                process.stdout.write(chalk.magenta("│ "));
+                firstChunk = false;
+              }
 
-          console.log(chalk.bold.magenta("\n╭─ T-AI"));
-          console.log(chalk.magenta("│"));
-
-          // Add left border to each line
-          const lines = formattedResponse.split("\n");
-          lines.forEach((line) => {
-            if (line.trim()) {
-              console.log(chalk.magenta("│ ") + line);
+              // Replace standard newlines with newlines + left box border
+              const formattedChunk = chunk.replace(/\n/g, `\n${chalk.magenta("│ ")}`);
+              process.stdout.write(formattedChunk);
             }
-          });
+          );
 
+          if (firstChunk) {
+            spinner.stop();
+          }
+
+          console.log(""); // Ensure we end the current line
           console.log(
             chalk.magenta("╰─") +
               chalk.dim(` ${new Date().toLocaleTimeString()}`)
